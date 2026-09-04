@@ -1,6 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
-import { AnimatePresence } from 'framer-motion'
+import { Routes, Route } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/Toast'
 import { Explore } from '@/screens/Explore'
 
@@ -12,20 +11,21 @@ const SavedPasses = lazy(() =>
 const DatePass = lazy(() => import('@/screens/DatePass').then((m) => ({ default: m.DatePass })))
 const NotFound = lazy(() => import('@/screens/NotFound').then((m) => ({ default: m.NotFound })))
 
+// NOTE: no AnimatePresence "mode=wait" around the routes. It caused the
+// generating screen (infinite spinner) to block the incoming /pass route from
+// ever becoming visible. Per-screen PageTransition still provides a subtle
+// enter animation. Routes now swap immediately and reliably.
 export default function App() {
-  const location = useLocation()
   return (
     <ToastProvider>
       <Suspense fallback={null}>
-        <AnimatePresence mode="wait">
-          <Routes location={location} key={location.pathname}>
-            <Route path="/" element={<Explore />} />
-            <Route path="/create" element={<Create />} />
-            <Route path="/saved" element={<SavedPasses />} />
-            <Route path="/pass/:hash" element={<DatePass />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AnimatePresence>
+        <Routes>
+          <Route path="/" element={<Explore />} />
+          <Route path="/create" element={<Create />} />
+          <Route path="/saved" element={<SavedPasses />} />
+          <Route path="/pass/:hash" element={<DatePass />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
       </Suspense>
     </ToastProvider>
   )
