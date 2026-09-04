@@ -25,3 +25,6 @@ supabase/.temp
 # Logs
 *.log
 npm-debug.log*
+
+# Requires token 'workflow' scope to push; add manually via GitHub UI or a scoped token
+.github/workflows/
