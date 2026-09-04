@@ -1,0 +1,19 @@
+# Render Static Site only — no Web Service, no Postgres, no Cron, no payment method.
+# The rewrite lets client-side routes (/pass/:hash, /create, /saved) resolve through the SPA.
+services:
+  - type: web
+    runtime: static
+    name: flow-pwa
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
