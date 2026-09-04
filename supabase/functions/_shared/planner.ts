@@ -250,7 +250,9 @@ function evaluateSequence(
     const mm = String(arrive.getMinutes()).padStart(2, '0')
 
     stops.push({
-      venue_id: v.id,
+      // Synthetic discovery ids (e.g. "geoapify:...") aren't DB uuids; store
+      // null so the pass snapshot doesn't depend on the background catalog save.
+      venue_id: isUuid(v.id) ? v.id : null,
       stop_order: i + 1,
       venue_name: v.name,
       venue_address: v.address,
@@ -462,4 +464,9 @@ function avg(xs: number[]): number {
 
 function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x))
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function isUuid(s: string): boolean {
+  return UUID_RE.test(s)
 }

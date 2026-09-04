@@ -107,23 +107,28 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'rate_check_failed' }, 500, cors)
   }
 
+  // 5) Load existing knowledge first so we can decide how much optional
+  // enrichment to run based on whether this area needs live discovery.
+  let venues = await loadVenues(service, norm.neighborhood)
+  const areaKnown = venues.length >= cfg.discovery_min_local_venues
+
   // 4) Optional NIM reasoning to structure SOFT intent (fails open).
+  // Only for already-known areas — for a brand-new area we prioritize a fast
+  // first result over soft-intent refinement (the area gets enriched later).
   const softExtra: string[] = []
-  if (cfg.nim_enabled && cfg.nim_reasoning_enabled && norm.free_text.trim()) {
+  if (cfg.nim_enabled && cfg.nim_reasoning_enabled && areaKnown && norm.free_text.trim()) {
     const reasoner = createReasoningProvider(cfg.nim_reasoning_model)
     const intent = await reasoner.structureIntent(norm.free_text)
     if (intent?.vibes) softExtra.push(...intent.vibes)
     if (intent?.wants_indoor) norm.preferences.push('mostly_indoor')
   }
 
-  // 5) Load existing knowledge.
-  let venues = await loadVenues(service, norm.neighborhood)
-
   // 5b) Structured discovery (Layer B) — makes Flow work worldwide.
   // If the local catalog for this area is thin, geocode the area and discover
   // real places via Geoapify, persist them (self-expanding knowledge), reload.
   // Fails open: if Geoapify is unavailable/exhausted we continue with what we have.
   let discoveredCenter: { lat: number; lng: number } | null = null
+  let justDiscovered = false
   if (cfg.discovery_enabled && venues.length < cfg.discovery_min_local_venues) {
     const geo = await geocodeArea(service, norm.neighborhood, cfg.geoapify_daily_credit_budget)
     if (geo) {
@@ -147,9 +152,15 @@ Deno.serve(async (req: Request) => {
         dailyBudget: cfg.geoapify_daily_credit_budget,
       })
 
-      // Persist discovered venues (idempotent) CONCURRENTLY so future requests
-      // are instant and this request doesn't serialize ~50 DB round-trips.
-      await Promise.all(
+      // Plan DIRECTLY from the in-memory discovered venues so we never block the
+      // user on ~50 DB writes + a reload. Discovered venues are snapshotted into
+      // the pass by name/coords (venue_id stays null), so persistence isn't on
+      // the critical path. Saving to the catalog happens in the background via
+      // waitUntil so future requests for this area are instant and cheap.
+      venues = venues.concat(discovered)
+      justDiscovered = discovered.length > 0
+
+      const bgSave = Promise.all(
         discovered.map((dv) =>
           service
             .rpc('upsert_discovered_venue', {
@@ -173,17 +184,22 @@ Deno.serve(async (req: Request) => {
             ),
         ),
       )
-
-      // Reload from the catalog so we plan against canonical persisted rows.
-      venues = await loadVenues(service, norm.neighborhood)
+      // Keep the function alive to finish the background save after responding.
+      try {
+        // @ts-ignore EdgeRuntime is available in Supabase Edge Functions.
+        if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(bgSave)
+      } catch {
+        /* if unavailable, the writes still race to complete */
+      }
     }
   }
 
   // Soft signal map (semantic recall + research boosts).
   const soft: SoftSignals = new Map()
 
-  // Step 3: optional semantic recall.
-  if (cfg.nim_enabled && cfg.nim_semantic_enabled) {
+  // Step 3: optional semantic recall. Skipped right after fresh discovery
+  // (those venues aren't embedded yet, so it can only add latency).
+  if (cfg.nim_enabled && cfg.nim_semantic_enabled && !justDiscovered) {
     const intentText = buildSoftIntentText(norm, softExtra)
     const provider = createSemanticProvider(cfg.nim_embed_model)
     const qvec = await provider.embedQuery(intentText)
@@ -220,7 +236,9 @@ Deno.serve(async (req: Request) => {
   )
 
   // 8) Selective web research (Steps 6-7). Triggered by confidence/risk.
-  if (cfg.research_enabled && knowledgeConfidence < cfg.research_trigger_confidence) {
+  // Skipped right after fresh discovery to keep first-time latency low; the
+  // area is now cached, so a later request can enrich it with research.
+  if (cfg.research_enabled && !justDiscovered && knowledgeConfidence < cfg.research_trigger_confidence) {
     const fp = await queryFingerprint({
       area: norm.neighborhood,
       exp: norm.experience_preference,
