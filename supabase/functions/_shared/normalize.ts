@@ -24,7 +24,7 @@ const EXPERIENCE: ExperiencePreference[] = [
 
 /** Default start/end clock windows per daypart, local time (hours). */
 const DAYPART_WINDOW: Record<TimeWindow, { start: number; end: number }> = {
-  afternoon: { start: 14, end: 18 },
+  afternoon: { start: 14, end: 19 }, // extends into early evening for more options
   evening: { start: 18, end: 23 },
   late_night: { start: 21, end: 26 }, // 26 = 2am next day
 }

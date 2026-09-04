@@ -158,6 +158,11 @@ export function planSequences(
     ['activity', 'anchor', 'closer'],
     ['anchor', 'closer'],
     ['activity', 'anchor'],
+    // Anchor-free options so afternoons/daytimes work even when sit-down
+    // "anchor" venues aren't open yet (e.g. dinner spots before 5pm).
+    ['activity', 'closer'],
+    ['activity', 'activity'],
+    ['closer', 'activity'],
   ]
 
   const results: ScoredSequence[] = []

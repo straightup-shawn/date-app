@@ -242,13 +242,19 @@ Deno.serve(async (req: Request) => {
   const best = feasible[0] ?? null
 
   if (!best) {
-    // Low-confidence: return the smallest useful relaxation instead of faking it.
-    const bestInfeasible = sequences[0] ?? null
+    // Base the relaxation hint on the CHEAPEST schedule-valid sequence so the
+    // budget suggestion reflects the smallest realistic bump, not the priciest
+    // combo the scorer happened to rank first.
+    const scheduleValid = sequences.filter((s) => s.scheduleOk)
+    const cheapest =
+      scheduleValid.length > 0
+        ? scheduleValid.reduce((a, b) => (b.totalCost < a.totalCost ? b : a))
+        : null
     return json(
       {
         error: 'no_feasible_plan',
         message: "Couldn't build a good route in this area with these constraints.",
-        relaxation_suggestion: relaxationSuggestion(norm, bestInfeasible),
+        relaxation_suggestion: relaxationSuggestion(norm, cheapest),
       },
       200,
       cors,
