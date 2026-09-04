@@ -28,9 +28,25 @@ export async function generateFlow(
     free_text: input.free_text ?? '',
   }
 
-  const { data, error } = await supabase.functions.invoke('generate-flow', {
-    body: payload,
-  })
+  // Safety net: a brand-new area does live discovery + research, which can take
+  // ~10-15s. Cap the wait so the UI never spins forever on a slow/hung call.
+  const timeout = new Promise<{ timedOut: true }>((resolve) =>
+    setTimeout(() => resolve({ timedOut: true }), 40000),
+  )
+  const call = supabase.functions.invoke('generate-flow', { body: payload })
+  const raced = await Promise.race([call, timeout])
+
+  if ('timedOut' in raced) {
+    return {
+      ok: false,
+      error: {
+        error: 'timeout',
+        message: "This is taking longer than expected. Please try again in a moment.",
+      },
+    }
+  }
+
+  const { data, error } = raced
 
   if (error) {
     // functions.invoke surfaces non-2xx as an error with a context response.

@@ -147,27 +147,32 @@ Deno.serve(async (req: Request) => {
         dailyBudget: cfg.geoapify_daily_credit_budget,
       })
 
-      // Persist discovered venues (idempotent) so future requests are instant.
-      for (const dv of discovered) {
-        const externalId = dv.id.replace(/^geoapify:/, '')
-        await service
-          .rpc('upsert_discovered_venue', {
-            p_external_id: externalId,
-            p_name: dv.name,
-            p_neighborhood: norm.neighborhood,
-            p_categories: dv.categories,
-            p_address: dv.address,
-            p_lat: dv.lat,
-            p_lng: dv.lng,
-            p_price_bucket: dv.price_bucket,
-            p_website_url: dv.website_url,
-            p_indoor: dv.indoor,
-            p_outdoor: dv.outdoor,
-            p_experience_families: dv.experience_families,
-            p_semantic_profile: discoveredProfile(dv),
-          })
-          .then(() => {}, () => {})
-      }
+      // Persist discovered venues (idempotent) CONCURRENTLY so future requests
+      // are instant and this request doesn't serialize ~50 DB round-trips.
+      await Promise.all(
+        discovered.map((dv) =>
+          service
+            .rpc('upsert_discovered_venue', {
+              p_external_id: dv.id.replace(/^geoapify:/, ''),
+              p_name: dv.name,
+              p_neighborhood: norm.neighborhood,
+              p_categories: dv.categories,
+              p_address: dv.address,
+              p_lat: dv.lat,
+              p_lng: dv.lng,
+              p_price_bucket: dv.price_bucket,
+              p_website_url: dv.website_url,
+              p_indoor: dv.indoor,
+              p_outdoor: dv.outdoor,
+              p_experience_families: dv.experience_families,
+              p_semantic_profile: discoveredProfile(dv),
+            })
+            .then(
+              () => {},
+              () => {},
+            ),
+        ),
+      )
 
       // Reload from the catalog so we plan against canonical persisted rows.
       venues = await loadVenues(service, norm.neighborhood)

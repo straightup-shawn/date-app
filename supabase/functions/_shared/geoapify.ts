@@ -91,35 +91,46 @@ export async function discoverVenues(
   const apiKey = key()
   if (!apiKey) return []
 
-  const out: Venue[] = []
-  const seen = new Set<string>()
+  // Only families that have category mappings.
+  const families = opts.families.filter((f) => (FAMILY_TO_GEOAPIFY[f] ?? []).length > 0)
 
-  for (const fam of opts.families) {
-    const cats = FAMILY_TO_GEOAPIFY[fam]
-    if (!cats || cats.length === 0) continue
+  // Guard credits up front (one per family), stopping at the budget ceiling.
+  const allowed: ExperienceFamily[] = []
+  for (const fam of families) {
+    if (await consume(service, 1, opts.dailyBudget)) allowed.push(fam)
+    else break
+  }
+  if (allowed.length === 0) return []
 
-    // Guard one credit per family request before calling.
-    if (!(await consume(service, 1, opts.dailyBudget))) break
-
-    try {
+  // Fire all discovery calls CONCURRENTLY — this is the big latency win.
+  const results = await Promise.all(
+    allowed.map(async (fam) => {
+      const cats = FAMILY_TO_GEOAPIFY[fam]
       const url =
         `https://api.geoapify.com/v2/places?categories=${encodeURIComponent(cats.join(','))}` +
         `&filter=circle:${opts.center.lng},${opts.center.lat},${opts.radiusMeters}` +
         `&bias=proximity:${opts.center.lng},${opts.center.lat}` +
         `&limit=${opts.perFamilyLimit}&apiKey=${apiKey}`
-      const res = await withTimeout(fetch(url), 9000)
-      if (!res.ok) continue
-      const json = (await res.json()) as GeoapifyPlacesResponse
-      for (const feat of json.features ?? []) {
-        const v = normalize(feat, fam, opts.neighborhood)
-        if (!v) continue
-        if (seen.has(v.id)) continue
-        seen.add(v.id)
-        out.push(v)
+      try {
+        const res = await withTimeout(fetch(url), 9000)
+        if (!res.ok) return [] as Venue[]
+        const json = (await res.json()) as GeoapifyPlacesResponse
+        return (json.features ?? [])
+          .map((feat) => normalize(feat, fam, opts.neighborhood))
+          .filter((v): v is Venue => v !== null)
+      } catch {
+        return [] as Venue[] // fail open per family
       }
-    } catch {
-      // fail open for this family
-      continue
+    }),
+  )
+
+  const out: Venue[] = []
+  const seen = new Set<string>()
+  for (const list of results) {
+    for (const v of list) {
+      if (seen.has(v.id)) continue
+      seen.add(v.id)
+      out.push(v)
     }
   }
   return out

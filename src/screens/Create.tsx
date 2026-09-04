@@ -35,7 +35,7 @@ export function Create() {
   const navigate = useNavigate()
   const toast = useToast()
 
-  const [area, setArea] = useState('Bukit Bintang')
+  const [area, setArea] = useState('')
   const [occasion, setOccasion] = useState<Occasion>('casual')
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('evening')
   const [experience, setExperience] = useState<ExperiencePreference>('surprise_me')
