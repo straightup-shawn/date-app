@@ -11,8 +11,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'robots.txt'],
       manifest: {
-        name: 'Flow — Date Itinerary Planner',
-        short_name: 'Flow',
+        name: 'Rov — Date Itinerary Planner',
+        short_name: 'Rov',
         description: 'Plan a multi-stop date worth going out for.',
         theme_color: '#0b0b0f',
         background_color: '#0b0b0f',

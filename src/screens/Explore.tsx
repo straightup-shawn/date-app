@@ -4,10 +4,9 @@ import { Sparkles, Sun, MoonStar, Users } from 'lucide-react'
 import { AppShell } from '@/components/shell/AppShell'
 import { CollapsingHeader } from '@/components/shell/CollapsingHeader'
 import { PageTransition } from '@/components/shell/PageTransition'
+import { ThemeToggle } from '@/components/shell/ThemeToggle'
 import { Surface } from '@/components/ui/Surface'
 import { Button } from '@/components/ui/Button'
-import { IconButton } from '@/components/ui/IconButton'
-import { useTheme } from '@/lib/useTheme'
 import { springMicro } from '@/lib/motion'
 
 const IDEAS = [
@@ -19,7 +18,6 @@ const IDEAS = [
 /** Explore: content-first landing. One clear action: start creating. */
 export function Explore() {
   const navigate = useNavigate()
-  const { theme, toggle } = useTheme()
 
   const greeting = getGreeting()
 
@@ -30,11 +28,7 @@ export function Explore() {
           title={greeting}
           subtitle="Plan something worth going out for."
           compactTitle="Explore"
-          right={
-            <IconButton label="Toggle theme" onClick={toggle}>
-              {theme === 'dark' ? <Sun size={20} /> : <MoonStar size={20} />}
-            </IconButton>
-          }
+          right={<ThemeToggle />}
         />
 
         <div className="space-y-3 px-5">

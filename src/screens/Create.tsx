@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react'
 import { AppShell } from '@/components/shell/AppShell'
 import { CollapsingHeader } from '@/components/shell/CollapsingHeader'
 import { PageTransition } from '@/components/shell/PageTransition'
+import { ThemeToggle } from '@/components/shell/ThemeToggle'
 import { Button } from '@/components/ui/Button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { ChoiceChip } from '@/components/ui/ChoiceChip'
@@ -94,7 +95,12 @@ export function Create() {
   return (
     <AppShell>
       <PageTransition>
-        <CollapsingHeader title="Create a Date Pass" compactTitle="Create" showBack />
+        <CollapsingHeader
+          title="Create a Date Pass"
+          compactTitle="Create"
+          showBack
+          right={<ThemeToggle />}
+        />
 
         <div className="space-y-6 px-5">
           <Field label="Where?">

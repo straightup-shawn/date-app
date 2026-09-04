@@ -109,7 +109,7 @@ function addMarkersAndRoute(
       source: 'flow-route',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#f0653a',
+        'line-color': '#4a7cff',
         'line-width': 3,
         'line-dasharray': [1.5, 1.5],
         'line-opacity': 0.75,

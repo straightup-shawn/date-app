@@ -4,6 +4,7 @@ import { Bookmark, MapPin } from 'lucide-react'
 import { AppShell } from '@/components/shell/AppShell'
 import { CollapsingHeader } from '@/components/shell/CollapsingHeader'
 import { PageTransition } from '@/components/shell/PageTransition'
+import { ThemeToggle } from '@/components/shell/ThemeToggle'
 import { Surface } from '@/components/ui/Surface'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -29,7 +30,7 @@ export function SavedPasses() {
   return (
     <AppShell>
       <PageTransition>
-        <CollapsingHeader title="My Passes" compactTitle="My Passes" />
+        <CollapsingHeader title="My Passes" compactTitle="My Passes" right={<ThemeToggle />} />
 
         <div className="space-y-3 px-5">
           {rows === null && (
