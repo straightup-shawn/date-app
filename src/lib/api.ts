@@ -10,11 +10,28 @@ import type {
   SavedPassRow,
 } from './types'
 
-/** Call generate-flow. Requires an (anonymous) session. */
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+
+/**
+ * Call generate-flow with a plain fetch (not supabase.functions.invoke).
+ * A direct fetch gives us a real AbortController timeout and predictable
+ * response handling — invoke has been unreliable about surfacing the body.
+ * Requires an (anonymous) session for the bearer token.
+ */
 export async function generateFlow(
   input: CreateInput,
 ): Promise<{ ok: true; data: GenerateResponse } | { ok: false; error: GenerateError }> {
   await ensureSession()
+
+  // Get the current access token for the Authorization header.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) {
+    return { ok: false, error: { error: 'no_session', message: 'Please refresh and try again.' } }
+  }
 
   const payload = {
     neighborhood: input.neighborhood,
@@ -28,41 +45,58 @@ export async function generateFlow(
     free_text: input.free_text ?? '',
   }
 
-  // Safety net: a brand-new area does live discovery + research, which can take
-  // ~10-15s. Cap the wait so the UI never spins forever on a slow/hung call.
-  const timeout = new Promise<{ timedOut: true }>((resolve) =>
-    setTimeout(() => resolve({ timedOut: true }), 40000),
-  )
-  const call = supabase.functions.invoke('generate-flow', { body: payload })
-  const raced = await Promise.race([call, timeout])
+  // Hard timeout so the UI can never spin forever.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 45000)
 
-  if ('timedOut' in raced) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-flow`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_ANON,
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+
+    // Parse the body regardless of status; the function returns JSON either way.
+    let body: unknown = null
+    try {
+      body = await res.json()
+    } catch {
+      /* non-JSON body */
+    }
+
+    if (!res.ok) {
+      const err = (body as GenerateError) ?? { error: 'http_' + res.status }
+      return { ok: false, error: err.error ? err : { error: 'http_' + res.status } }
+    }
+
+    const resp = body as GenerateResponse | GenerateError
+    if (!resp || typeof resp !== 'object') {
+      return { ok: false, error: { error: 'bad_response', message: 'Unexpected response. Please try again.' } }
+    }
+    if ('error' in resp) return { ok: false, error: resp as GenerateError }
+    if (!('share_hash' in resp) || !resp.share_hash) {
+      return { ok: false, error: { error: 'bad_response', message: 'No plan returned. Please try again.' } }
+    }
+    return { ok: true, data: resp as GenerateResponse }
+  } catch (e) {
+    clearTimeout(timer)
+    const aborted = e instanceof DOMException && e.name === 'AbortError'
     return {
       ok: false,
       error: {
-        error: 'timeout',
-        message: "This is taking longer than expected. Please try again in a moment.",
+        error: aborted ? 'timeout' : 'network',
+        message: aborted
+          ? "This took too long. Please try again."
+          : 'Network problem reaching the planner. Please try again.',
       },
     }
   }
-
-  const { data, error } = raced
-
-  if (error) {
-    // functions.invoke surfaces non-2xx as an error with a context response.
-    let parsed: GenerateError = { error: 'unknown' }
-    try {
-      const ctx = (error as { context?: Response }).context
-      if (ctx) parsed = (await ctx.json()) as GenerateError
-    } catch {
-      /* ignore */
-    }
-    return { ok: false, error: parsed }
-  }
-
-  const resp = data as GenerateResponse | GenerateError
-  if ('error' in resp) return { ok: false, error: resp }
-  return { ok: true, data: resp }
 }
 
 /** Fetch a public Date Pass by share hash (no account required). */

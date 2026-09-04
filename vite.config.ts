@@ -32,19 +32,17 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // New deploys take over immediately so users never get trapped on a
+        // stale JS bundle (this was causing the app to hang on old code).
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         // Cache the app shell for offline reopening.
         navigateFallback: '/index.html',
+        // Never let the SW handle navigations to API/function paths.
+        navigateFallbackDenylist: [/^\/functions\//, /^\/rest\//, /^\/auth\//],
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         runtimeCaching: [
-          {
-            // Cache the most recently opened Date Pass payloads (RPC GET).
-            urlPattern: ({ url }) => url.pathname.includes('/rest/v1/rpc/get_date_pass'),
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'flow-date-pass',
-              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
           {
             // Map tiles / style — cache-first, they are static assets.
             urlPattern: ({ url }) =>
@@ -56,6 +54,8 @@ export default defineConfig({
             },
           },
         ],
+        // IMPORTANT: do not cache or intercept Supabase API/function/auth calls.
+        // These must always hit the network so generation never uses stale data.
       },
       devOptions: { enabled: false },
     }),
