@@ -122,13 +122,15 @@ export function buildCandidates(
       const quality = (v.data_quality ?? 50) / 100
       const rating = v.rating ? Math.min(1, v.rating / 5) : 0.5
       const softBoost = soft.get(v.id) ?? 0
+      const occasionFit = occasionVibeFit(req.occasion, v)
 
       const baseScore =
-        0.30 * daypart +
-        0.20 * expW +
-        0.20 * quality +
-        0.15 * rating +
-        0.15 * softBoost
+        0.26 * daypart +
+        0.18 * expW +
+        0.18 * quality +
+        0.12 * rating +
+        0.13 * softBoost +
+        0.13 * occasionFit
 
       out.push({ venue: v, family: fam, role, baseScore })
     }
@@ -153,17 +155,27 @@ export function planSequences(
     byRole[role] = byRole[role].slice(0, 8) // keep top-N per role for tractability
   }
 
-  const templates: StopRole[][] = [
-    ['anchor', 'activity', 'closer'],
-    ['activity', 'anchor', 'closer'],
-    ['anchor', 'closer'],
-    ['activity', 'anchor'],
-    // Anchor-free options so afternoons/daytimes work even when sit-down
-    // "anchor" venues aren't open yet (e.g. dinner spots before 5pm).
-    ['activity', 'closer'],
-    ['activity', 'activity'],
-    ['closer', 'activity'],
-  ]
+  // Romantic occasions must be built around a real food/drinks anchor — no
+  // anchor-free "activity + activity" plans (that's how a theatre or civic
+  // venue ended up leading an anniversary). Other occasions keep the flexible
+  // set so afternoons/daytimes still work when sit-down venues aren't open.
+  const romantic = req.occasion === 'first_date' || req.occasion === 'anniversary'
+  const templates: StopRole[][] = romantic
+    ? [
+        ['anchor', 'activity', 'closer'],
+        ['activity', 'anchor', 'closer'],
+        ['anchor', 'closer'],
+        ['activity', 'anchor'],
+      ]
+    : [
+        ['anchor', 'activity', 'closer'],
+        ['activity', 'anchor', 'closer'],
+        ['anchor', 'closer'],
+        ['activity', 'anchor'],
+        ['activity', 'closer'],
+        ['activity', 'activity'],
+        ['closer', 'activity'],
+      ]
 
   const results: ScoredSequence[] = []
   const seen = new Set<string>()
@@ -469,4 +481,31 @@ function clamp01(x: number): number {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 function isUuid(s: string): boolean {
   return UUID_RE.test(s)
+}
+
+/**
+ * How well a venue's vibe fits the occasion (0..1). Romantic occasions favour
+ * romantic/cozy/conversation-friendly places and are wary of venues with no
+ * vibe signal at all (often generic map points like civic squares).
+ */
+function occasionVibeFit(occasion: NormalizedRequest['occasion'], v: Venue): number {
+  const tags = new Set(v.vibe_tags.map((t) => t.toLowerCase()))
+  const romantic = occasion === 'first_date' || occasion === 'anniversary'
+  const group = occasion === 'casual_group'
+
+  if (romantic) {
+    if (tags.has('romantic')) return 1
+    if (tags.has('cozy') || tags.has('conversation_friendly')) return 0.85
+    if (tags.has('photogenic')) return 0.7
+    if (tags.has('lively')) return 0.5
+    if (tags.size === 0) return 0.25 // no vibe signal → risky for a romantic date
+    return 0.5
+  }
+  if (group) {
+    if (tags.has('group_friendly') || tags.has('lively')) return 1
+    if (tags.size === 0) return 0.4
+    return 0.6
+  }
+  // Casual: broadly fine, mild preference for places with any positive vibe.
+  return tags.size > 0 ? 0.8 : 0.55
 }

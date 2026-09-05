@@ -108,16 +108,53 @@ function expandAbbreviation(input: string): string {
 // Geoapify Places categories mapped to Flow experience families.
 // Each family we plan for maps to a set of Geoapify category strings.
 const FAMILY_TO_GEOAPIFY: Record<ExperienceFamily, string[]> = {
-  food: ['catering.restaurant', 'catering.fast_food'],
+  // Restaurants only (no fast food as a date anchor).
+  food: ['catering.restaurant'],
   drinks: ['catering.cafe', 'catering.bar'],
-  activity: ['entertainment', 'leisure', 'sport'],
-  culture: ['entertainment.museum', 'entertainment.culture', 'tourism.sights'],
-  outdoor: ['leisure.park', 'natural', 'tourism.attraction'],
-  explore: ['tourism.sights', 'commercial.marketplace', 'tourism.attraction'],
+  activity: [
+    'entertainment.cinema',
+    'entertainment.bowling_alley',
+    'entertainment.escape_game',
+    'entertainment.miniature_golf',
+    'leisure.spa',
+    'entertainment.activity_park',
+  ],
+  // Real cultural venues, not generic "sights".
+  culture: ['entertainment.museum', 'entertainment.culture', 'entertainment.culture.gallery', 'entertainment.culture.theatre'],
+  outdoor: ['leisure.park', 'natural', 'tourism.attraction.viewpoint'],
+  // Markets + specific attractions, not civic "sights".
+  explore: ['commercial.marketplace', 'tourism.attraction'],
   shopping: ['commercial.shopping_mall', 'commercial.marketplace'],
   nightlife: ['catering.bar', 'catering.pub', 'adult.nightclub'],
   event: [],
 }
+
+// Category fragments that should NEVER be recommended as date stops.
+const BLOCKED_CATEGORY_FRAGMENTS = [
+  'government',
+  'office',
+  'administrative',
+  'townhall',
+  'courthouse',
+  'embassy',
+  'police',
+  'fire_station',
+  'hospital',
+  'clinic',
+  'fuel',
+  'parking',
+  'bank',
+  'atm',
+  'fast_food',
+  'monument', // civic monuments/plazas (e.g. Dataran DBKL) aren't date stops
+  'memorial',
+  'sport.sports_centre', // generic sports halls / associations / clubs
+  'sport.stadium',
+  'school',
+  'university',
+  'college',
+  'place_of_worship',
+]
 
 /**
  * Discover places around a center point for the given families.
@@ -217,7 +254,18 @@ function normalize(
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
 
   const cats = p.categories ?? []
+
+  // Reject civic/utility/no-go places outright (e.g. government squares,
+  // parking, banks) — they are never good date stops.
+  const catStr = cats.join(' ')
+  if (BLOCKED_CATEGORY_FRAGMENTS.some((frag) => catStr.includes(frag))) return null
+
+  // A named place with no meaningful category is usually a generic map point;
+  // skip it rather than risk suggesting something random.
+  if (cats.length === 0) return null
+
   const indoor = deriveIndoor(fam, cats)
+  const { vibes, quality } = deriveVibesAndQuality(fam, cats)
 
   return {
     id: `geoapify:${p.place_id}`, // stable synthetic id for dedupe pre-persist
@@ -236,13 +284,62 @@ function normalize(
     indoor,
     outdoor: indoor === false ? true : null,
     experience_families: [fam],
-    vibe_tags: [],
+    vibe_tags: vibes,
     pax_min: null,
     pax_max: null,
     price_confidence: 35,
     hours_confidence: 30, // discovered: hours unverified but plausibly open
-    data_quality: 55,
+    data_quality: quality,
   }
+}
+
+/**
+ * Derive soft vibe tags + a quality baseline from Geoapify categories so the
+ * planner can prefer genuinely date-appropriate venues over generic points.
+ */
+function deriveVibesAndQuality(
+  fam: ExperienceFamily,
+  cats: string[],
+): { vibes: string[]; quality: number } {
+  const c = cats.join(' ')
+  const vibes = new Set<string>()
+  let quality = 50
+
+  if (c.includes('restaurant')) {
+    vibes.add('conversation_friendly')
+    quality += 8
+  }
+  if (c.includes('cafe') || c.includes('coffee') || c.includes('tea')) {
+    vibes.add('conversation_friendly')
+    vibes.add('cozy')
+    quality += 8
+  }
+  if (c.includes('bar') || c.includes('pub') || c.includes('rooftop') || c.includes('lounge')) {
+    vibes.add('lively')
+    quality += 5
+  }
+  if (c.includes('museum') || c.includes('gallery') || c.includes('theatre') || c.includes('culture')) {
+    vibes.add('conversation_friendly')
+    vibes.add('unusual')
+    quality += 8
+  }
+  if (c.includes('park') || c.includes('garden') || c.includes('viewpoint') || c.includes('natural')) {
+    vibes.add('photogenic')
+    quality += 4
+  }
+  if (c.includes('spa') || c.includes('wine') || c.includes('fine')) {
+    vibes.add('romantic')
+    quality += 6
+  }
+  if (c.includes('cinema') || c.includes('arcade') || c.includes('karaoke') || c.includes('bowling')) {
+    vibes.add('group_friendly')
+    quality += 4
+  }
+  // Higher-signal categories (specific real venues) beat generic "attraction".
+  if (c.includes('attraction') && cats.length <= 1) quality -= 8
+
+  void fam
+  return { vibes: Array.from(vibes), quality: Math.max(30, Math.min(75, quality)) }
 }
 
 function deriveIndoor(fam: ExperienceFamily, cats: string[]): boolean | null {

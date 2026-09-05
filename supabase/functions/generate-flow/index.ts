@@ -177,6 +177,8 @@ Deno.serve(async (req: Request) => {
               p_outdoor: dv.outdoor,
               p_experience_families: dv.experience_families,
               p_semantic_profile: discoveredProfile(dv),
+              p_vibe_tags: dv.vibe_tags,
+              p_data_quality: dv.data_quality,
             })
             .then(
               () => {},
