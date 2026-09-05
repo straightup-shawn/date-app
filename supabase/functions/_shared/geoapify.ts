@@ -35,27 +35,74 @@ export async function geocodeArea(
   const apiKey = key()
   if (!apiKey || !area.trim()) return null
 
-  if (!(await consume(service, 1, dailyBudget))) return null
+  const query = expandAbbreviation(area.trim())
 
+  // First try a strict city lookup (best precision). If it finds nothing,
+  // fall back to a general search so abbreviations, neighborhoods, landmarks
+  // and loosely-typed input still resolve. Each attempt costs 1 credit, and
+  // we only spend the second when the first returns no usable result.
+  const strict = await geocodeOnce(service, apiKey, query, dailyBudget, true)
+  if (strict) return strict
+  return geocodeOnce(service, apiKey, query, dailyBudget, false)
+}
+
+async function geocodeOnce(
+  service: SupabaseClient,
+  apiKey: string,
+  query: string,
+  dailyBudget: number,
+  cityOnly: boolean,
+): Promise<GeocodedArea | null> {
+  if (!(await consume(service, 1, dailyBudget))) return null
   try {
+    const typeParam = cityOnly ? '&type=city' : ''
     const url =
-      `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(area)}` +
-      `&type=city&limit=1&format=json&apiKey=${apiKey}`
+      `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(query)}` +
+      `${typeParam}&limit=1&format=json&apiKey=${apiKey}`
     const res = await withTimeout(fetch(url), 8000)
     if (!res.ok) return null
     const json = (await res.json()) as {
-      results?: Array<{ lat?: number; lon?: number; formatted?: string; city?: string; name?: string }>
+      results?: Array<{
+        lat?: number
+        lon?: number
+        formatted?: string
+        city?: string
+        name?: string
+        suburb?: string
+        district?: string
+      }>
     }
     const r = json.results?.[0]
     if (!r || typeof r.lat !== 'number' || typeof r.lon !== 'number') return null
     return {
-      name: r.name || r.city || r.formatted || area,
+      name: r.name || r.suburb || r.district || r.city || r.formatted || query,
       lat: r.lat,
       lng: r.lon,
     }
   } catch {
     return null
   }
+}
+
+// Common area abbreviations users type. Keeps discovery robust to shorthand.
+const ABBREVIATIONS: Record<string, string> = {
+  kl: 'Kuala Lumpur',
+  nyc: 'New York City',
+  sf: 'San Francisco',
+  la: 'Los Angeles',
+  pj: 'Petaling Jaya',
+  jb: 'Johor Bahru',
+  kk: 'Kota Kinabalu',
+  hk: 'Hong Kong',
+  sg: 'Singapore',
+  bkk: 'Bangkok',
+  dxb: 'Dubai',
+  ldn: 'London',
+}
+
+function expandAbbreviation(input: string): string {
+  const key = input.toLowerCase().replace(/[.\s]/g, '')
+  return ABBREVIATIONS[key] ?? input
 }
 
 // Geoapify Places categories mapped to Flow experience families.
