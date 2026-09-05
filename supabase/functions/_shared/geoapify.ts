@@ -105,6 +105,108 @@ function expandAbbreviation(input: string): string {
   return ABBREVIATIONS[key] ?? input
 }
 
+/**
+ * Entity resolution (Section 4.9): resolve a curated venue NAME to a real place
+ * near the area center via Geoapify. Returns a normalized Venue tagged as a
+ * curated local-favorite (high quality), or null if it can't be confidently
+ * resolved (unresolved names are never recommended). 1 credit per call.
+ */
+export async function resolveVenueByName(
+  service: SupabaseClient,
+  opts: {
+    name: string
+    center: { lat: number; lng: number }
+    neighborhood: string
+    radiusMeters: number
+    dailyBudget: number
+  },
+): Promise<Venue | null> {
+  const apiKey = key()
+  if (!apiKey || !opts.name.trim()) return null
+  if (!(await consume(service, 1, opts.dailyBudget))) return null
+
+  try {
+    // Bias the search to the area so we match the local venue, not a namesake.
+    const url =
+      `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(opts.name)}` +
+      `&bias=proximity:${opts.center.lng},${opts.center.lat}` +
+      `&filter=circle:${opts.center.lng},${opts.center.lat},${Math.max(opts.radiusMeters, 6000)}` +
+      `&limit=1&format=json&apiKey=${apiKey}`
+    const res = await withTimeout(fetch(url), 8000)
+    if (!res.ok) return null
+    const json = (await res.json()) as {
+      results?: Array<{
+        lat?: number
+        lon?: number
+        name?: string
+        formatted?: string
+        address_line2?: string
+        categories?: string[]
+        website?: string
+        place_id?: string
+      }>
+    }
+    const r = json.results?.[0]
+    if (!r || typeof r.lat !== 'number' || typeof r.lon !== 'number' || !r.place_id) return null
+
+    // Require a name match (the resolved place should resemble the query) and a
+    // category that makes sense as a venue (has some category).
+    const cats = r.categories ?? []
+    const catStr = cats.join(' ')
+    if (BLOCKED_CATEGORY_FRAGMENTS.some((frag) => catStr.includes(frag))) return null
+
+    const fam = familyFromCategories(cats)
+    if (!fam) return null
+
+    const indoor = deriveIndoor(fam, cats)
+    const { vibes } = deriveVibesAndQuality(fam, cats)
+    // Curated venues get a strong quality baseline + local-favorite signal.
+    const curatedVibes = Array.from(new Set([...vibes, 'local_favorite', 'recommended']))
+
+    return {
+      id: `geoapify:${r.place_id}`,
+      name: r.name || opts.name,
+      neighborhood: opts.neighborhood,
+      categories: cats.slice(0, 8),
+      address: r.address_line2 ?? r.formatted ?? null,
+      lat: r.lat,
+      lng: r.lon,
+      price_bucket: defaultPriceBucket(fam),
+      est_cost_total: null,
+      rating: null,
+      opening_hours: null,
+      booking_url: null,
+      website_url: r.website ?? null,
+      indoor,
+      outdoor: indoor === false ? true : null,
+      experience_families: [fam],
+      vibe_tags: curatedVibes,
+      pax_min: null,
+      pax_max: null,
+      price_confidence: 40,
+      hours_confidence: 30,
+      data_quality: 72, // curated + resolved → high
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Best-guess Flow family from Geoapify categories. */
+function familyFromCategories(cats: string[]): ExperienceFamily | null {
+  const c = cats.join(' ')
+  if (c.includes('catering.restaurant')) return 'food'
+  if (c.includes('catering.cafe')) return 'drinks'
+  if (c.includes('catering.bar') || c.includes('pub') || c.includes('nightclub')) return 'nightlife'
+  if (c.includes('museum') || c.includes('gallery') || c.includes('theatre') || c.includes('culture')) return 'culture'
+  if (c.includes('park') || c.includes('garden') || c.includes('viewpoint') || c.includes('natural')) return 'outdoor'
+  if (c.includes('cinema') || c.includes('bowling') || c.includes('escape') || c.includes('leisure')) return 'activity'
+  if (c.includes('mall') || c.includes('marketplace')) return 'shopping'
+  if (c.includes('catering')) return 'food'
+  if (c.includes('tourism')) return 'explore'
+  return null
+}
+
 // Geoapify Places categories mapped to Flow experience families.
 // Each family we plan for maps to a set of Geoapify category strings.
 const FAMILY_TO_GEOAPIFY: Record<ExperienceFamily, string[]> = {

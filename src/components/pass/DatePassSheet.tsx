@@ -10,9 +10,17 @@ interface DatePassSheetProps {
   pass: DatePass
   selectedStopId: string | null
   onSelectStop: (id: string) => void
+  selectedOptions: Record<string, number>
+  onSelectOption: (stopId: string, index: number) => void
 }
 
-export function DatePassSheet({ pass, selectedStopId, onSelectStop }: DatePassSheetProps) {
+export function DatePassSheet({
+  pass,
+  selectedStopId,
+  onSelectStop,
+  selectedOptions,
+  onSelectOption,
+}: DatePassSheetProps) {
   const toast = useToast()
   const selectedStop = pass.stops.find((s) => s.id === selectedStopId) ?? null
 
@@ -39,7 +47,13 @@ export function DatePassSheet({ pass, selectedStopId, onSelectStop }: DatePassSh
         Share this pass
       </Button>
 
-      <Timeline stops={pass.stops} selectedStopId={selectedStopId} onSelectStop={onSelectStop} />
+      <Timeline
+        stops={pass.stops}
+        selectedStopId={selectedStopId}
+        onSelectStop={onSelectStop}
+        selectedOptions={selectedOptions}
+        onSelectOption={onSelectOption}
+      />
 
       {selectedStop && (
         <div className="pt-1">

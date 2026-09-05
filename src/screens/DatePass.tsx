@@ -31,6 +31,8 @@ export function DatePass() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null)
   const [snap, setSnap] = useState<SnapPoint>('half')
+  // Per-stop chosen option: stopId -> index (-1 = primary, 0..n = alternative).
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, number>>({})
 
   useEffect(() => {
     let alive = true
@@ -106,12 +108,32 @@ export function DatePass() {
 
   const { pass } = state
 
+  // Apply each stop's chosen option so the map + summary reflect selections.
+  const effectiveStops = pass.stops.map((s) => {
+    const idx = selectedOptions[s.id] ?? -1
+    if (idx < 0 || !s.alternatives || !s.alternatives[idx]) return s
+    const opt = s.alternatives[idx]
+    return {
+      ...s,
+      venue_name: opt.venue_name,
+      venue_address: opt.venue_address,
+      coordinates: opt.coordinates,
+      fit_reason: opt.fit_reason,
+      est_cost_total: opt.est_cost_total,
+      booking_url: opt.booking_url,
+    }
+  })
+  const effectivePass = { ...pass, stops: effectiveStops }
+
+  const selectOption = (stopId: string, index: number) =>
+    setSelectedOptions((prev) => ({ ...prev, [stopId]: index }))
+
   return (
     <div className="relative min-h-[100dvh] overflow-hidden bg-bg">
       {/* Live map layer */}
       <Suspense fallback={<Skeleton className="absolute inset-0 rounded-none" />}>
         <FlowMap
-          stops={pass.stops}
+          stops={effectiveStops}
           selectedStopId={selectedStopId}
           onSelectStop={(id) => {
             setSelectedStopId(id)
@@ -137,12 +159,14 @@ export function DatePass() {
       {/* Draggable content sheet */}
       <Sheet snap={snap} onSnapChange={setSnap}>
         <DatePassSheet
-          pass={pass}
+          pass={effectivePass}
           selectedStopId={selectedStopId}
           onSelectStop={(id) => {
             setSelectedStopId(id)
             if (snap === 'peek') setSnap('half')
           }}
+          selectedOptions={selectedOptions}
+          onSelectOption={selectOption}
         />
       </Sheet>
     </div>

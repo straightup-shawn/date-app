@@ -8,6 +8,7 @@ import type {
   ConfidenceBreakdown,
   NormalizedRequest,
   PlannedStop,
+  StopOption,
   Venue,
   WeatherContext,
 } from './types.ts'
@@ -287,6 +288,7 @@ function evaluateSequence(
       transit_distance_meters: transit?.meters ?? null,
       route_geojson: null,
       booking_url: v.booking_url,
+      alternatives: [],
     })
 
     cursor = depart
@@ -417,6 +419,83 @@ function computeConfidence(
     routing_confidence,
     overall_confidence,
   }
+}
+
+/**
+ * For each stop in the chosen sequence, attach up to `max` alternative venues
+ * of the same family that also fit that stop's time slot and are affordable and
+ * not already used elsewhere in the plan. Best-first by baseScore.
+ */
+export function attachAlternatives(
+  seq: ScoredSequence,
+  candidates: RoleCandidate[],
+  req: NormalizedRequest,
+  max = 3,
+): void {
+  const usedIds = new Set(seq.stops.map((s) => s.venue_id).filter(Boolean) as string[])
+  const usedNames = new Set(seq.stops.map((s) => s.venue_name.toLowerCase()))
+  const budgetCap = totalBudget(req)
+
+  for (const stop of seq.stops) {
+    const fam = stop.category as ExperienceFamily | null
+    if (!fam) {
+      stop.alternatives = []
+      continue
+    }
+    const slotStart = stop.scheduled_time ? timeToDate(req.scheduled_for, stop.scheduled_time) : null
+    const dur = stop.duration_minutes ?? FAMILY_DURATION[fam] ?? 60
+
+    const pool = candidates
+      .filter((c) => c.family === fam)
+      .filter((c) => !usedNames.has(c.venue.name.toLowerCase()))
+      .sort((a, b) => b.baseScore - a.baseScore)
+
+    const alts: StopOption[] = []
+    for (const c of pool) {
+      const v = c.venue
+      if (alts.length >= max) break
+      // Skip the primary + already-picked venues.
+      if (v.name.toLowerCase() === stop.venue_name.toLowerCase()) continue
+      // Opening-hours feasibility for the same slot when known.
+      if (slotStart && v.opening_hours) {
+        const depart = new Date(slotStart.getTime() + dur * 60000)
+        if (!isOpenDuring(v.opening_hours, slotStart, depart)) continue
+      }
+      const { cost } = estimateVenueCost(v, req.pax)
+      // Rough affordability: alt shouldn't be wildly over the whole budget.
+      if (cost > budgetCap) continue
+
+      const dupName = alts.some((a) => a.venue_name.toLowerCase() === v.name.toLowerCase())
+      if (dupName) continue
+
+      alts.push({
+        venue_id: isUuid(v.id) ? v.id : null,
+        venue_name: v.name,
+        venue_address: v.address,
+        coordinates: { lat: v.lat, lng: v.lng },
+        fit_reason: buildFitReason(v, {
+          role: c.role,
+          family: fam,
+          withinBudget: cost <= budgetCap,
+          transitFromPrev: null,
+          indoor: v.indoor,
+        }),
+        est_cost_total: cost,
+        booking_url: v.booking_url,
+      })
+      usedNames.add(v.name.toLowerCase())
+    }
+    stop.alternatives = alts
+    void usedIds
+  }
+}
+
+function timeToDate(baseIso: string, hhmmss: string): Date {
+  const base = new Date(baseIso)
+  const [h, m] = hhmmss.split(':').map(Number)
+  const d = new Date(base)
+  d.setHours(h, m, 0, 0)
+  return d
 }
 
 /** Smallest useful relaxation suggestion (Step 16). */

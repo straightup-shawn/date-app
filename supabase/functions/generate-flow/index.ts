@@ -10,10 +10,12 @@ import { normalizeRequest, totalBudget } from '../_shared/normalize.ts'
 import { loadVenues } from '../_shared/venues.ts'
 import { getWeatherContext } from '../_shared/weather.ts'
 import { runResearch } from '../_shared/research.ts'
-import { geocodeArea, discoverVenues, discoveredProfile } from '../_shared/geoapify.ts'
+import { geocodeArea, discoverVenues, discoveredProfile, resolveVenueByName } from '../_shared/geoapify.ts'
+import { researchCuratedVenues } from '../_shared/research.ts'
 import type { ExperienceFamily } from '../_shared/taxonomy.ts'
 import { createReasoningProvider, createSemanticProvider } from '../_shared/semantic.ts'
 import {
+  attachAlternatives,
   buildCandidates,
   planSequences,
   relaxationSuggestion,
@@ -143,25 +145,40 @@ Deno.serve(async (req: Request) => {
         'explore',
         'nightlife',
       ]
-      const discovered = await discoverVenues(service, {
-        center: discoveredCenter,
-        neighborhood: norm.neighborhood,
-        families,
-        radiusMeters: cfg.discovery_radius_meters,
-        perFamilyLimit: cfg.discovery_per_family_limit,
-        dailyBudget: cfg.geoapify_daily_credit_budget,
-      })
+      // Curated candidates (Layer C): pull named venues from "best/top" blog
+      // lists, resolve each to a real place, and merge as HIGH-QUALITY options.
+      // This runs in parallel with raw discovery. Fails open.
+      const curatedPromise = getCuratedVenues(service, cfg, norm, discoveredCenter)
+
+      const [discovered, curated] = await Promise.all([
+        discoverVenues(service, {
+          center: discoveredCenter,
+          neighborhood: norm.neighborhood,
+          families,
+          radiusMeters: cfg.discovery_radius_meters,
+          perFamilyLimit: cfg.discovery_per_family_limit,
+          dailyBudget: cfg.geoapify_daily_credit_budget,
+        }),
+        curatedPromise,
+      ])
+
+      // Merge curated first (they're higher quality), then raw discovery,
+      // de-duplicated by id.
+      const mergedById = new Map<string, (typeof discovered)[number]>()
+      for (const v of curated) mergedById.set(v.id, v)
+      for (const v of discovered) if (!mergedById.has(v.id)) mergedById.set(v.id, v)
+      const allDiscovered = Array.from(mergedById.values())
 
       // Plan DIRECTLY from the in-memory discovered venues so we never block the
       // user on ~50 DB writes + a reload. Discovered venues are snapshotted into
       // the pass by name/coords (venue_id stays null), so persistence isn't on
       // the critical path. Saving to the catalog happens in the background via
       // waitUntil so future requests for this area are instant and cheap.
-      venues = venues.concat(discovered)
-      justDiscovered = discovered.length > 0
+      venues = venues.concat(allDiscovered)
+      justDiscovered = allDiscovered.length > 0
 
       const bgSave = Promise.all(
-        discovered.map((dv) =>
+        allDiscovered.map((dv) =>
           service
             .rpc('upsert_discovered_venue', {
               p_external_id: dv.id.replace(/^geoapify:/, ''),
@@ -266,6 +283,9 @@ Deno.serve(async (req: Request) => {
   const feasible = sequences.filter((s) => s.scheduleOk && s.budgetOk)
   const best = feasible[0] ?? null
 
+  // Attach up to 3 alternative options per stop (for the carousel).
+  if (best) attachAlternatives(best, candidates, norm, 3)
+
   if (!best) {
     // Base the relaxation hint on the CHEAPEST schedule-valid sequence so the
     // budget suggestion reflects the smallest realistic bump, not the priciest
@@ -355,6 +375,69 @@ async function persistWithRetry(
     if (!msg.includes('duplicate key') && !msg.includes('unique')) return null
   }
   return null
+}
+
+/**
+ * Fetch curated venue names from blog listicles and resolve them to real
+ * places. Returns high-quality Venue candidates (curated + entity-resolved).
+ * Bounded credit use; fails open to an empty list.
+ */
+async function getCuratedVenues(
+  service: ReturnType<typeof createClient>,
+  cfg: Awaited<ReturnType<typeof loadConfig>>,
+  norm: ReturnType<typeof normalizeRequest>,
+  center: { lat: number; lng: number },
+): Promise<Venue[]> {
+  if (!cfg.research_enabled) return []
+  try {
+    // Choose intents by experience preference: always seek food + a date/activity list.
+    const intents: Array<'food' | 'date' | 'activity'> =
+      norm.experience_preference === 'activity_focused'
+        ? ['activity', 'food']
+        : ['food', 'date']
+
+    const nameLists = await Promise.all(
+      intents.map(async (intent) => {
+        const fp = await queryFingerprint({ area: norm.neighborhood, curated: intent })
+        const r = await researchCuratedVenues(service, {
+          area: norm.neighborhood,
+          intent,
+          queryFingerprint: fp,
+          monthlyBudget: cfg.research_monthly_credit_budget,
+          researchEnabled: cfg.research_enabled,
+        })
+        return r.names
+      }),
+    )
+
+    // Flatten + dedupe names, cap how many we resolve (each costs 1 Geoapify credit).
+    const seen = new Set<string>()
+    const names: string[] = []
+    for (const list of nameLists) {
+      for (const n of list) {
+        const key = n.name.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        names.push(n.name)
+      }
+    }
+    const toResolve = names.slice(0, 12)
+
+    const resolved = await Promise.all(
+      toResolve.map((name) =>
+        resolveVenueByName(service, {
+          name,
+          center,
+          neighborhood: norm.neighborhood,
+          radiusMeters: cfg.discovery_radius_meters,
+          dailyBudget: cfg.geoapify_daily_credit_budget,
+        }),
+      ),
+    )
+    return resolved.filter((v): v is Venue => v !== null)
+  } catch {
+    return []
+  }
 }
 
 function buildSoftIntentText(norm: ReturnType<typeof normalizeRequest>, extra: string[]): string {

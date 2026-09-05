@@ -34,6 +34,16 @@ export interface WeatherSnapshot {
   source: 'live' | 'cached' | 'unavailable'
 }
 
+export interface StopOption {
+  venue_id: string | null
+  venue_name: string
+  venue_address: string | null
+  coordinates: { lat: number; lng: number }
+  fit_reason: string
+  est_cost_total: number | null
+  booking_url: string | null
+}
+
 export interface PassStop {
   id: string
   stop_order: number
@@ -52,6 +62,7 @@ export interface PassStop {
   coordinates: { lat: number; lng: number }
   route_geojson: unknown | null
   booking_url: string | null
+  alternatives?: StopOption[]
 }
 
 export interface DatePass {

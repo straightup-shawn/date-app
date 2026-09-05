@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { Footprints, Car, ChevronRight } from 'lucide-react'
+import { StopCarousel } from './StopCarousel'
 import type { PassStop } from '@/lib/types'
 import { formatMYR, formatTime, formatDuration, formatTransit } from '@/lib/format'
 import { cn } from '@/lib/cn'
@@ -9,6 +10,8 @@ interface TimelineProps {
   stops: PassStop[]
   selectedStopId: string | null
   onSelectStop: (id: string) => void
+  selectedOptions: Record<string, number>
+  onSelectOption: (stopId: string, index: number) => void
 }
 
 /**
@@ -16,7 +19,13 @@ interface TimelineProps {
  * the matching map pin. Map information is mirrored here so the map is not the
  * only way to understand the itinerary (Section 2A.12).
  */
-export function Timeline({ stops, selectedStopId, onSelectStop }: TimelineProps) {
+export function Timeline({
+  stops,
+  selectedStopId,
+  onSelectStop,
+  selectedOptions,
+  onSelectOption,
+}: TimelineProps) {
   return (
     <ol className="space-y-2">
       {stops.map((stop) => {
@@ -80,24 +89,33 @@ export function Timeline({ stops, selectedStopId, onSelectStop }: TimelineProps)
                     </span>
                   )}
 
-                  {active && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      transition={springMicro}
-                      className="overflow-hidden"
-                    >
-                      <div className="mt-3 space-y-1 border-t border-border pt-3 text-meta text-text-secondary">
-                        {stop.venue_address && <p>{stop.venue_address}</p>}
-                        {stop.category && (
-                          <p className="capitalize text-text-tertiary">{stop.category}</p>
-                        )}
-                      </div>
-                    </motion.div>
+                  {active && (stop.venue_address || stop.category) && (
+                    <div className="mt-3 space-y-1 border-t border-border pt-3 text-meta text-text-secondary">
+                      {stop.venue_address && <p>{stop.venue_address}</p>}
+                      {stop.category && (
+                        <p className="capitalize text-text-tertiary">{stop.category}</p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
             </button>
+
+            {/* Options carousel lives OUTSIDE the button (it contains buttons). */}
+            {active && stop.alternatives && stop.alternatives.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={springMicro}
+                className="px-1"
+              >
+                <StopCarousel
+                  stop={stop}
+                  selectedIndex={selectedOptions[stop.id] ?? -1}
+                  onSelectOption={(index) => onSelectOption(stop.id, index)}
+                />
+              </motion.div>
+            )}
           </li>
         )
       })}

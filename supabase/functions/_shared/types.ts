@@ -129,6 +129,17 @@ export interface WeatherContext {
   source: 'live' | 'cached' | 'unavailable'
 }
 
+/** One alternative option for a stop (same role/time slot). */
+export interface StopOption {
+  venue_id: string | null
+  venue_name: string
+  venue_address: string | null
+  coordinates: { lat: number; lng: number }
+  fit_reason: string
+  est_cost_total: number | null
+  booking_url: string | null
+}
+
 export interface PlannedStop {
   venue_id: string | null
   stop_order: number
@@ -147,6 +158,8 @@ export interface PlannedStop {
   transit_distance_meters: number | null
   route_geojson: unknown | null
   booking_url: string | null
+  /** Other options for this stop (same role/slot), best-first. Excludes the primary. */
+  alternatives: StopOption[]
 }
 
 export interface ConfidenceBreakdown {
