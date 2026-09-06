@@ -280,8 +280,17 @@ Deno.serve(async (req: Request) => {
   const candidates = buildCandidates(venues, norm, weather, soft)
   const sequences = planSequences(candidates, norm, weather)
 
-  const feasible = sequences.filter((s) => s.scheduleOk && s.budgetOk)
-  const best = feasible[0] ?? null
+  let feasible = sequences.filter((s) => s.scheduleOk && s.budgetOk)
+  let best = feasible[0] ?? null
+
+  // If a romantic request couldn't form a plan (thin/lopsided candidate pool),
+  // retry with relaxed templates so we still return something useful rather
+  // than failing outright.
+  if (!best && (norm.occasion === 'first_date' || norm.occasion === 'anniversary')) {
+    const relaxed = planSequences(candidates, norm, weather, true)
+    feasible = relaxed.filter((s) => s.scheduleOk && s.budgetOk)
+    best = feasible[0] ?? null
+  }
 
   // Attach up to 3 alternative options per stop (for the carousel).
   if (best) attachAlternatives(best, candidates, norm, 3)

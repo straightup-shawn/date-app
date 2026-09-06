@@ -37,13 +37,15 @@ export async function geocodeArea(
 
   const query = expandAbbreviation(area.trim())
 
-  // First try a strict city lookup (best precision). If it finds nothing,
-  // fall back to a general search so abbreviations, neighborhoods, landmarks
-  // and loosely-typed input still resolve. Each attempt costs 1 credit, and
-  // we only spend the second when the first returns no usable result.
-  const strict = await geocodeOnce(service, apiKey, query, dailyBudget, true)
-  if (strict) return strict
-  return geocodeOnce(service, apiKey, query, dailyBudget, false)
+  // If the input is more specific than a bare city (a neighborhood, street or
+  // landmark — usually indicated by a comma or multiple words), do the GENERAL
+  // search first so "Orchard Road, Singapore" resolves to Orchard Road, not the
+  // country centroid. For bare single-word city names, prefer the strict city
+  // lookup for precision. Fall back to the other mode if the first finds nothing.
+  const looksSpecific = query.includes(',') || query.trim().split(/\s+/).length >= 2
+  const first = await geocodeOnce(service, apiKey, query, dailyBudget, !looksSpecific)
+  if (first) return first
+  return geocodeOnce(service, apiKey, query, dailyBudget, looksSpecific)
 }
 
 async function geocodeOnce(

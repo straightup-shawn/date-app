@@ -144,6 +144,7 @@ export function planSequences(
   candidates: RoleCandidate[],
   req: NormalizedRequest,
   weather: WeatherContext,
+  relaxTemplates = false,
 ): ScoredSequence[] {
   const byRole: Record<StopRole, RoleCandidate[]> = {
     anchor: [],
@@ -160,7 +161,7 @@ export function planSequences(
   // anchor-free "activity + activity" plans (that's how a theatre or civic
   // venue ended up leading an anniversary). Other occasions keep the flexible
   // set so afternoons/daytimes still work when sit-down venues aren't open.
-  const romantic = req.occasion === 'first_date' || req.occasion === 'anniversary'
+  const romantic = (req.occasion === 'first_date' || req.occasion === 'anniversary') && !relaxTemplates
   const templates: StopRole[][] = romantic
     ? [
         ['anchor', 'activity', 'closer'],
