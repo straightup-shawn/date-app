@@ -30,7 +30,9 @@ export function DatePass() {
 
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null)
-  const [snap, setSnap] = useState<SnapPoint>('half')
+  // Open with the plan front-and-center (content is the product). Users can
+  // drag the sheet down to reveal more of the map.
+  const [snap, setSnap] = useState<SnapPoint>('full')
   // Per-stop chosen option: stopId -> index (-1 = primary, 0..n = alternative).
   const [selectedOptions, setSelectedOptions] = useState<Record<string, number>>({})
 
