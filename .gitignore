@@ -28,3 +28,7 @@ npm-debug.log*
 
 # Requires token 'workflow' scope to push; add manually via GitHub UI or a scoped token
 .github/workflows/
+
+# transient auth token file — never commit
+.tok
+*.tok
